@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Home, Grid, MessageSquare, User, Heart, MessageCircle, 
-  Send, Image, Plus, Smile, ChevronLeft, Phone, Video, Menu, MoreHorizontal
+  Send, Image, Plus, Smile, ChevronLeft, Phone, Video, Menu, MoreHorizontal, Sparkles
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 
@@ -170,7 +170,7 @@ export default function WangWangApp() {
           {
             chat_id: selectedChatId,
             sender: "them",
-            text: "WangWangでメッセージ届いたよ！リアルタイム通信大成功だワン！🐾",
+            text: "WangWangでメッセージを受け取りました！リアルタイム通信は正常に機能しています✨",
             is_read: false
           }
         ]);
@@ -204,7 +204,7 @@ export default function WangWangApp() {
           <div className="w-full space-y-8">
             <div className="flex items-center gap-3 px-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white shadow-md">
-                <span className="text-xl">🐾</span>
+                <Sparkles className="w-5 h-5" />
               </div>
               <span className="hidden xl:inline font-bold text-2xl tracking-wider bg-gradient-to-r from-indigo-600 to-pink-500 bg-clip-text text-transparent">WangWang</span>
             </div>
@@ -295,7 +295,7 @@ export default function WangWangApp() {
                       <textarea 
                         value={newPostText}
                         onChange={(e) => setNewPostText(e.target.value)}
-                        placeholder="今なにしてる？ワンちゃんのことでも何でもつぶやいてね🐾" 
+                        placeholder="今なにしてる？新しい日常をシェアしよう！✨" 
                         rows={3}
                         className="w-full p-2 border-none resize-none text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-0 text-sm"
                       />
@@ -409,7 +409,7 @@ export default function WangWangApp() {
                 <div className="mb-6 flex justify-between items-center border-b border-slate-200 pb-3">
                   <div>
                     <h2 className="text-lg font-bold text-slate-800">メディアグリッド</h2>
-                    <p className="text-xs text-slate-500">写真からWangWangのコミュニティを探索します</p>
+                    <p className="text-xs text-slate-500">美しいビジュアルからコミュニティを探索します</p>
                   </div>
                 </div>
 
@@ -584,7 +584,7 @@ export default function WangWangApp() {
                     </div>
 
                     <p className="text-sm text-slate-600 mt-4 leading-relaxed">
-                      ハイブリッドSNS「WangWang」開発中🐾！Twitter、LINE、Instagramのメリットを統合した、日常共有に最適な最高にハッピーな空間を作っています。
+                      ハイブリッドSNS「WangWang」開発中✨！Twitter、LINE、Instagramのメリットを統合した、日常共有に最適な新しいコミュニケーション空間を作っています。
                     </p>
                   </div>
                 </div>
