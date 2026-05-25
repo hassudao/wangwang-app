@@ -5,18 +5,11 @@ import {
   Home, Search, PlusSquare, MessageCircle, User, 
   Bell, Send, Image as ImageIcon, Heart, MessageSquare, Share2,
   Sparkles, LogOut, Mail, Lock, UserPlus, LogIn, ChevronLeft,
-  Camera, Check, X, AlertCircle
+  Camera, Check, X, AlertCircle, RefreshCw, Calendar, Flame
 } from 'lucide-react';
-
-// SupabaseおよびCloudinaryの情報を動的に安全に解決する
-// プレビューのesbuildで `@supabase/supabase-js` を解決できないビルドエラーを回避するため、
-// windowオブジェクトからCDN経由でロードされたSupabaseに安全にアクセスできるようにし、
-// 設定がない場合のフォールバック（動作確認用ローカルストレージモックモード）も完全に組み込みます。
 
 const getSafeEnv = (key) => {
   if (typeof window !== 'undefined') {
-    // ブラウザ・サンドボックスなどのNode環境外での "process is not defined" エラーを完全に防ぐために、
-    // 事前にprocessオブジェクトおよびenvオブジェクトの存在を厳密にチェックします。
     const hasProcessEnv = typeof process !== 'undefined' && process.env;
     if (hasProcessEnv) {
       if (key === 'NEXT_PUBLIC_SUPABASE_URL') return process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -42,7 +35,6 @@ const getSupabaseClient = () => {
 export default function App() {
   const [supabase, setSupabase] = useState(null);
 
-  // 認証関連ステート
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
@@ -52,27 +44,18 @@ export default function App() {
   const [usernameInput, setUsernameInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // アプリUI関連ステート
   const [activeTab, setActiveTab] = useState('home');
   const [profile, setProfile] = useState({
-    username: 'guest',
-    display_name: 'ゲストユーザー',
-    bio: 'WangWangへようこそ！',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+    username: 'guest_user',
+    display_name: 'ゲストワンちゃん',
+    bio: 'WangWangへようこそ！新しいハイブリッドなSNS空間を一緒に作っていこう🐾',
+    avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80', // 犬アバター
+    cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
   });
 
-  // 各種設定のUIアシスト用ローカルストレージ入力（環境変数がないプレビュー環境向け）
-  const [localCloudName, setLocalCloudName] = useState('');
-  const [localUploadPreset, setLocalUploadPreset] = useState('');
-
-  // 通知（トースト）ステート (alertの代わり)
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-
-  // カスタム確認モーダルステート (confirmの代わり)
   const [confirmModal, setConfirmModal] = useState({ show: false, message: '', onConfirm: () => {} });
 
-  // プロフィール編集用ステート
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editUsername, setEditUsername] = useState('');
   const [editName, setEditName] = useState('');
@@ -80,29 +63,29 @@ export default function App() {
   const [editAvatar, setEditAvatar] = useState('');
   const [editCover, setEditCover] = useState('');
 
-  // Cloudinaryアップロード処理用ステート
-  const [uploadingField, setUploadingField] = useState(null); // 'avatar' or 'cover' or 'post'
+  const [uploadingField, setUploadingField] = useState(null); 
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // ファイル参照用Ref
   const avatarInputRef = useRef(null);
   const coverInputRef = useRef(null);
   const postImageInputRef = useRef(null);
 
-  // タイムライン・投稿関連ステート
   const [posts, setPosts] = useState([]);
   const [newPostText, setNewPostText] = useState('');
   const [newPostImage, setNewPostImage] = useState('');
 
-  // DM (LINE風) 関連ステート
-  const [selectedChat, setSelectedChat] = useState(null); // モバイル用の詳細画面遷移用
+  const [selectedChat, setSelectedChat] = useState(null); 
   const [chatMessages, setChatMessages] = useState([
     { id: 1, sender: 'Yui', text: 'WangWangに登録したよ！これからよろしくね。', time: '10:24', isMe: false, read: true },
     { id: 2, sender: 'Me', text: 'ありがとう！デザインかなりいい感じに仕上がってきたよ！', time: '10:26', isMe: true, read: true }
   ]);
   const [newMessageText, setNewMessageText] = useState('');
 
-  // トースト表示関数
+  // プロ野球（NPB）リアルタイム検索結果ステート
+  const [baseballLoading, setBaseballLoading] = useState(false);
+  const [baseballError, setBaseballError] = useState('');
+  const [baseballData, setBaseballData] = useState(null);
+
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => {
@@ -110,14 +93,47 @@ export default function App() {
     }, 3000);
   };
 
-  // CDN経由でSupabaseライブラリをブラウザから安全に動的読み込みする
   useEffect(() => {
-    const initSupabaseAndAuth = async () => {
+    const initApp = async () => {
       if (typeof window !== 'undefined') {
-        // ローカルストレージに入力されたCloudinary用キャッシュのロード
-        setLocalCloudName(localStorage.getItem('CLOUDINARY_CLOUD_NAME') || '');
-        setLocalUploadPreset(localStorage.getItem('CLOUDINARY_PRESET') || '');
+        // デフォルトの投稿データをLocalStorageから取得、存在しない場合は初期モックを表示
+        const storedPosts = localStorage.getItem('wangwang_local_posts_v2');
+        if (storedPosts) {
+          try {
+            setPosts(JSON.parse(storedPosts));
+          } catch(e) {
+            console.error(e);
+          }
+        } else {
+          const defaultPosts = [
+            {
+              id: 1,
+              user: 'ワンちゃん隊長',
+              username: 'dog_captain',
+              avatar: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+              text: 'WangWangへようこそ！このアプリは、投稿内容をリロードしても消えずに保存される仕組みがしっかりと組まれているよ！お気軽に投稿を試してみてね🐾',
+              image: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?w=600&auto=format&fit=crop&q=80',
+              likes: 12,
+              comments: 3,
+              time: '1時間前'
+            },
+            {
+              id: 2,
+              user: 'ユイ',
+              username: 'yui_wang',
+              avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+              text: 'ハイブリッドSNS、動きが軽快でチャットも使いやすい！デザインもモダンで可愛いですね。',
+              image: null,
+              likes: 5,
+              comments: 1,
+              time: '3時間前'
+            }
+          ];
+          setPosts(defaultPosts);
+          localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(defaultPosts));
+        }
 
+        // Supabase の CDN スクリプト読み込み
         if (!window.supabase) {
           const script = document.createElement('script');
           script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
@@ -133,16 +149,88 @@ export default function App() {
           setSupabase(client);
           setupAuthListener(client);
         }
+
+        // 初回ロード時にプロ野球データを自動取得
+        fetchTodayBaseballResults();
       }
     };
 
-    initSupabaseAndAuth();
+    initApp();
   }, []);
 
-  // ログイン状態の監視セットアップ
+  const fetchTodayBaseballResults = async () => {
+    setBaseballLoading(true);
+    setBaseballError('');
+    try {
+      const apiKey = ""; // Canvas環境により自動適用されるため空文字列で定義
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+      const userQuery = "2026年5月25日前後（直近日程）の日本のプロ野球（NPB）の試合結果、対戦カード、スコア、現在の状況を日本語で正確に教えてください。";
+      const systemPrompt = "プロ野球(NPB)の最新情報を検索して報告する、世界一親切なスポーツアンカー。試合がない日の場合は『本日の試合はありません。直近の試合スケジュールは以下です。』と前置きをして予定を箇条書きしてください。";
+
+      const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        tools: [{ "google_search": {} }],
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
+        },
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              date: { type: "STRING", description: "例: 2026年5月25日の結果" },
+              summary: { type: "STRING", description: "今日のNPB概況・試合予定などの簡単な1行サマリー" },
+              games: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    homeTeam: { type: "STRING", description: "ホーム球団名" },
+                    awayTeam: { type: "STRING", description: "ビジター球団名" },
+                    homeScore: { type: "STRING", description: "ホーム得点（未開始なら '-'）" },
+                    awayScore: { type: "STRING", description: "ビジター得点（未開始なら '-'）" },
+                    status: { type: "STRING", description: "例: 試合終了, 6回裏, 中止, 18:00開始予定" }
+                  },
+                  required: ["homeTeam", "awayTeam", "status"]
+                }
+              }
+            },
+            required: ["date", "summary", "games"]
+          }
+        }
+      };
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error('スコアの取得に失敗しました。時間をおいて再試行してください。');
+      }
+
+      const result = await response.json();
+      const candidate = result.candidates?.[0];
+
+      if (candidate && candidate.content?.parts?.[0]?.text) {
+        const jsonText = candidate.content.parts[0].text;
+        const parsedData = JSON.parse(jsonText);
+        setBaseballData(parsedData);
+      } else {
+        throw new Error('解析可能な野球データが取得できませんでした。');
+      }
+    } catch (err) {
+      console.error('NPB Fetch Error:', err);
+      setBaseballError(err.message || '野球データの読み込み中にエラーが発生しました。');
+    } finally {
+      setBaseballLoading(false);
+    }
+  };
+
   const setupAuthListener = (supabaseClient) => {
     if (!supabaseClient) {
-      // Supabase環境が未定義の場合はローカルストレージのモックアカウントを使用
       const mockSession = localStorage.getItem('wangwang_mock_session');
       if (mockSession) {
         const parsed = JSON.parse(mockSession);
@@ -153,7 +241,6 @@ export default function App() {
       return;
     }
 
-    // 現在のセッションを取得
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -162,7 +249,6 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    // 認証状態の変化を監視
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -176,19 +262,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   };
 
-  const resetProfileToGuest = () => {
-    setProfile({
-      username: 'guest',
-      display_name: 'ゲストユーザー',
-      bio: 'WangWangへようこそ！',
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
-    });
-  };
-
-  // プロフィールの取得
   const fetchUserProfile = async (userId, supabaseClient) => {
-    // モックモード
     if (!supabaseClient) {
       const storedProfile = localStorage.getItem(`wangwang_profile_${userId}`);
       if (storedProfile) {
@@ -205,8 +279,8 @@ export default function App() {
           username: 'tester',
           display_name: 'テストユーザー',
           bio: 'プレビュー検証用モックプロファイルです。',
-          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+          avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
         };
         localStorage.setItem(`wangwang_profile_${userId}`, JSON.stringify(defaultProfile));
         setProfile(defaultProfile);
@@ -219,7 +293,6 @@ export default function App() {
       return;
     }
 
-    // 本番Supabaseモード
     try {
       const { data, error } = await supabaseClient
         .from('profiles')
@@ -243,8 +316,8 @@ export default function App() {
           username: defaultUsername,
           display_name: '新しいユーザー',
           bio: 'ステータスメッセージは未設定です。',
-          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+          avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
         };
         const { error: insertError } = await supabaseClient
           .from('profiles')
@@ -263,7 +336,6 @@ export default function App() {
     }
   };
 
-  // Cloudinaryへのダイレクトアップロード
   const uploadToCloudinary = async (file, fieldType) => {
     const CLOUDINARY_PRESET = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
     const CLOUDINARY_CLOUD_NAME = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME');
@@ -272,12 +344,11 @@ export default function App() {
     const uploadPreset = CLOUDINARY_PRESET || localUploadPreset;
 
     if (!cloudName || !uploadPreset) {
-      // 設定がない場合のデモ用ダミーURLフォールバック
-      showToast('Cloudinary未連携のため、モック用の画像を仮適用します。', 'success');
+      showToast('Cloudinaryが未設定のため、デモ用画像を仮選択しました！', 'success');
       const mockImages = {
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-        cover: 'https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?w=800&auto=format&fit=crop&q=80',
-        post: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600&auto=format&fit=crop&q=80'
+        avatar: 'https://images.unsplash.com/photo-1537151625747-768eb6cf92b2?w=150&auto=format&fit=crop&q=80',
+        cover: 'https://images.unsplash.com/photo-1541599540903-216a46ca1ad0?w=800&auto=format&fit=crop&q=80',
+        post: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=600&auto=format&fit=crop&q=80'
       };
       return mockImages[fieldType];
     }
@@ -290,13 +361,13 @@ export default function App() {
     formData.append('upload_preset', uploadPreset);
 
     try {
-      setUploadProgress(45);
+      setUploadProgress(50);
       const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
         method: 'POST',
         body: formData,
       });
 
-      if (!res.ok) throw new Error('Cloudinaryへのアップロードに失敗しました。設定値を確認してください。');
+      if (!res.ok) throw new Error('Cloudinaryアップロードに失敗しました。接続情報が正しいかご確認ください。');
 
       setUploadProgress(85);
       const data = await res.json();
@@ -317,7 +388,6 @@ export default function App() {
     }
   };
 
-  // ファイル選択ハンドラー
   const handleFileChange = async (e, fieldType) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -332,25 +402,16 @@ export default function App() {
 
     if (fieldType === 'avatar') {
       setEditAvatar(uploadedUrl);
-      showToast('プロフィール画像を仮適用しました。保存で決定されます。', 'success');
+      showToast('プロフィールアイコンを仮セットしました（保存で確定されます）', 'success');
     } else if (fieldType === 'cover') {
       setEditCover(uploadedUrl);
-      showToast('ヘッダー画像を仮適用しました。保存で決定されます。', 'success');
+      showToast('ヘッダー画像を仮セットしました（保存で確定されます）', 'success');
     } else if (fieldType === 'post') {
       setNewPostImage(uploadedUrl);
-      showToast('画像を投稿に添付しました！', 'success');
+      showToast('投稿に画像を添付しました！', 'success');
     }
   };
 
-  // アシスト用のローカルストレージ設定保存
-  const handleSaveLocalCloudinary = (e) => {
-    e.preventDefault();
-    localStorage.setItem('CLOUDINARY_CLOUD_NAME', localCloudName.trim());
-    localStorage.setItem('CLOUDINARY_PRESET', localUploadPreset.trim());
-    showToast('ブラウザ上にCloudinaryの設定を一時保存しました！', 'success');
-  };
-
-  // 新規アカウント作成
   const handleSignUp = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -362,21 +423,20 @@ export default function App() {
     const usernameRegex = /^[a-zA-Z0-9_]{3,15}$/;
     const checkUsername = usernameInput.trim().toLowerCase();
     if (!usernameRegex.test(checkUsername)) {
-      setAuthError('ユーザーネームは3〜15文字の英数字、またはアンダースコア(_)のみ使用可能です。');
+      setAuthError('ユーザーネームは3〜15文字の英数字、またはアンダースコア(_)のみです。');
       return;
     }
 
     if (!supabase) {
-      // モックモード新規作成
       const mockUser = { id: `user_${Date.now()}`, email };
       localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
       const mockProfile = {
         id: mockUser.id,
         username: checkUsername,
-        display_name: displayNameInput || '新規ユーザー',
-        bio: 'WangWangへようこそ！',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+        display_name: displayNameInput || '新規ワンちゃん',
+        bio: 'WangWangへようこそ！新しい空間を一緒に楽しみましょう🐾',
+        avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+        cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
       };
       localStorage.setItem(`wangwang_profile_${mockUser.id}`, JSON.stringify(mockProfile));
       setUser(mockUser);
@@ -386,11 +446,10 @@ export default function App() {
       setEditBio(mockProfile.bio);
       setEditAvatar(mockProfile.avatar_url);
       setEditCover(mockProfile.cover_url);
-      showToast('テストアカウントを仮作成しました（モック動作）', 'success');
+      showToast('テストアカウントを仮作成しました（モック起動）', 'success');
       return;
     }
 
-    // 本番Supabase
     try {
       const { data: existingUser } = await supabase
         .from('profiles')
@@ -412,8 +471,8 @@ export default function App() {
           username: checkUsername,
           display_name: displayNameInput || email.split('@')[0],
           bio: 'WangWangへようこそ！',
-          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+          avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
         };
 
         const { error: profileError } = await supabase
@@ -429,7 +488,6 @@ export default function App() {
     }
   };
 
-  // ログイン
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -439,7 +497,6 @@ export default function App() {
     }
 
     if (!supabase) {
-      // モックモードログイン
       const mockUser = { id: 'mock_user_123', email };
       localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
       setUser(mockUser);
@@ -453,31 +510,10 @@ export default function App() {
       if (error) throw error;
       showToast('ログインしました！', 'success');
     } catch (err) {
-      setAuthError('ログインに失敗しました。認証情報を確認してください。');
+      setAuthError('ログインに失敗しました。認証情報をご確認ください。');
     }
   };
 
-  // ログアウト
-  const handleLogout = () => {
-    setConfirmModal({
-      show: true,
-      message: 'ログアウトしてもよろしいですか？',
-      onConfirm: async () => {
-        if (supabase) {
-          await supabase.auth.signOut();
-        } else {
-          localStorage.removeItem('wangwang_mock_session');
-          setUser(null);
-          resetProfileToGuest();
-        }
-        setActiveTab('home');
-        setConfirmModal({ show: false, message: '', onConfirm: () => {} });
-        showToast('ログアウトしました');
-      }
-    });
-  };
-
-  // プロフィール編集・送信
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     if (!user) return;
@@ -499,7 +535,6 @@ export default function App() {
     };
 
     if (!supabase) {
-      // モックプロフィールのローカル更新
       localStorage.setItem(`wangwang_profile_${user.id}`, JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
       setIsEditModalOpen(false);
@@ -532,7 +567,6 @@ export default function App() {
     }
   };
 
-  // タイムライン投稿送信
   const handleCreatePost = (e) => {
     e.preventDefault();
     if (!newPostText.trim() && !newPostImage) return;
@@ -549,22 +583,27 @@ export default function App() {
       time: '今さっき'
     };
 
-    setPosts([newPost, ...posts]);
+    const updatedPosts = [newPost, ...posts];
+    setPosts(updatedPosts);
+    // リロードしても消えないように即座にLocalStorageへ保存
+    localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(updatedPosts));
+
     setNewPostText('');
     setNewPostImage('');
+    showToast('新しく投稿しました！🐾', 'success');
   };
 
-  // タイムライン投稿にいいね
   const toggleLike = (postId) => {
-    setPosts(posts.map(post => {
+    const updatedPosts = posts.map(post => {
       if (post.id === postId) {
         return { ...post, likes: post.likes + 1 };
       }
       return post;
-    }));
+    });
+    setPosts(updatedPosts);
+    localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(updatedPosts));
   };
 
-  // メッセージの送信
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessageText.trim()) return;
@@ -597,151 +636,6 @@ export default function App() {
     }, 1500);
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-900 text-white flex flex-col justify-center items-center">
-        <Sparkles className="w-12 h-12 text-indigo-400 animate-spin mb-4" />
-        <p className="text-sm text-slate-400 font-medium">WangWangを起動中...</p>
-      </div>
-    );
-  }
-
-  // 認証前画面
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center px-4">
-        <div className="w-full max-w-md bg-slate-900/50 border border-slate-800 p-8 rounded-3xl backdrop-blur-md shadow-2xl">
-          
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-3">
-              <Sparkles className="w-7 h-7 text-white" />
-            </div>
-            <h1 className="text-3xl font-black bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">WangWang</h1>
-            <p className="text-xs text-slate-400 mt-1">次世代ハイブリッド・ミニマルSNS</p>
-          </div>
-
-          <h2 className="text-xl font-bold text-slate-200 mb-6 text-center">
-            {authMode === 'login' ? 'おかえりなさい' : '新しくアカウントを作る'}
-          </h2>
-
-          {authError && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-3.5 rounded-xl mb-4 leading-relaxed flex items-start gap-2 animate-pulse">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{authError}</span>
-            </div>
-          )}
-
-          <form onSubmit={authMode === 'login' ? handleLogin : handleSignUp} className="space-y-4">
-            {authMode === 'signup' && (
-              <>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">ユーザーネーム (@ID)</label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 text-slate-500 font-bold text-sm">@</span>
-                    <input
-                      type="text"
-                      placeholder="username (英数字・3〜15文字)"
-                      value={usernameInput}
-                      onChange={(e) => setUsernameInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">表示名</label>
-                  <div className="relative">
-                    <User className="absolute left-3.5 top-3 w-5 h-5 text-slate-500" />
-                    <input
-                      type="text"
-                      placeholder="表示名 (例: タクミ)"
-                      value={displayNameInput}
-                      onChange={(e) => setNewPostText(e.target.value)} // 元の記述を修正
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
-                      required
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">メールアドレス</label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-slate-500" />
-                <input
-                  type="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">パスワード</label>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-3.5 w-4.5 h-4.5 text-slate-500" />
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
-                  required
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-xl font-bold text-sm hover:from-indigo-600 hover:to-purple-700 active:scale-98 transition shadow-lg shadow-indigo-500/15 flex items-center justify-center gap-2 mt-2"
-            >
-              {authMode === 'login' ? (
-                <>
-                  <LogIn className="w-4 h-4" /> ログインする
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4" /> アカウントを作成する
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center text-xs text-slate-500">
-            {authMode === 'login' ? (
-              <p>
-                アカウントをお持ちでないですか？{' '}
-                <button
-                  onClick={() => { setAuthMode('signup'); setAuthError(''); }}
-                  className="text-indigo-400 font-semibold hover:underline"
-                >
-                  新規登録はこちら
-                </button>
-              </p>
-            ) : (
-              <p>
-                すでにアカウントをお持ちですか？{' '}
-                <button
-                  onClick={() => { setAuthMode('login'); setAuthError(''); }}
-                  className="text-indigo-400 font-semibold hover:underline"
-                >
-                  ログインはこちら
-                </button>
-              </p>
-            )}
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  // アプリケーションメイン
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex justify-center">
       <div className="w-full max-w-7xl flex relative font-sans">
@@ -825,7 +719,7 @@ export default function App() {
                       <textarea 
                         value={newPostText}
                         onChange={(e) => setNewPostText(e.target.value)}
-                        placeholder="今なにしてる？" 
+                        placeholder="今なにしてる？愛犬のことや雑談を投稿しよう！🐾" 
                         className="w-full resize-none border-none focus:ring-0 text-sm placeholder-slate-400 min-h-[70px] outline-none"
                       />
                       
@@ -848,6 +742,7 @@ export default function App() {
                             type="button"
                             onClick={() => postImageInputRef.current?.click()}
                             className="text-indigo-500 hover:bg-indigo-50 p-2 rounded-full transition"
+                            title="画像を追加"
                           >
                             <Camera className="w-5 h-5" />
                           </button>
@@ -1079,7 +974,7 @@ export default function App() {
           {activeTab === 'profile' && (
             <div className="p-4 bg-white">
               
-              {/* Cover Header */}
+              {/* Cover Header - 見切れ防止構造へ修正 */}
               <div className="relative mb-14">
                 <div 
                   className="h-44 bg-slate-100 rounded-2xl bg-cover bg-center"
@@ -1094,7 +989,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Profile details (Email is not displayed here) */}
+              {/* Profile details */}
               <div className="px-4 mb-8">
                 <div className="flex justify-between items-start mb-2">
                   <div className="min-w-0 flex-1 pr-4">
@@ -1135,55 +1030,113 @@ export default function App() {
 
         </main>
 
-        {/* RIGHT SIDEBAR */}
-        <aside className="hidden lg:block w-80 p-4 h-screen sticky top-0 space-y-4 overflow-y-auto">
-          {/* LocalStorage Integration Assistant for Preview Environments */}
-          <div className="bg-slate-50 rounded-2xl p-4 border border-indigo-100">
-            <h3 className="font-bold text-xs text-indigo-700 mb-2 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" />
-              Cloudinary お助け接続設定
-            </h3>
-            <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
-              本番のVercel環境では、ダッシュボードの「Environment Variables」に設定するだけで自動連携されます。このプレビュー画面で一時的にアップロードを試したい場合は、以下に入力して保存できます。
-            </p>
-            <form onSubmit={handleSaveLocalCloudinary} className="space-y-2.5">
-              <div>
-                <label className="block text-[9px] font-bold text-slate-400 mb-0.5">Cloud Name</label>
-                <input 
-                  type="text" 
-                  value={localCloudName}
-                  onChange={(e) => setLocalCloudName(e.target.value)}
-                  placeholder="例: dxxxxxx" 
-                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] font-bold text-slate-400 mb-0.5">Upload Preset (Unsigned)</label>
-                <input 
-                  type="text" 
-                  value={localUploadPreset}
-                  onChange={(e) => setLocalUploadPreset(e.target.value)}
-                  placeholder="例: wangwang_preset" 
-                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-500"
-                />
-              </div>
+        {/* ─── RIGHT SIDEBAR ─── */}
+        {}
+        <aside className="hidden lg:block w-80 p-4 h-screen sticky top-0 space-y-4 overflow-y-auto bg-slate-50 border-l border-slate-200">
+          
+          {/* NPB Baseball Live Scores Section */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200/60 shadow-sm space-y-3">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-emerald-600" />
+                プロ野球 今日の結果
+              </h3>
               <button 
-                type="submit"
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 rounded-lg text-[10px] transition"
+                onClick={fetchTodayBaseballResults} 
+                disabled={baseballLoading}
+                className="p-1 hover:bg-slate-100 rounded-full transition text-slate-500 disabled:opacity-50"
+                title="最新情報に更新"
               >
-                接続設定を保存する
+                <RefreshCw className={`w-3.5 h-3.5 ${baseballLoading ? 'animate-spin text-indigo-500' : ''}`} />
               </button>
-            </form>
+            </div>
+
+            {baseballLoading ? (
+              <div className="py-8 text-center text-xs text-slate-400 space-y-2">
+                <RefreshCw className="w-6 h-6 animate-spin mx-auto text-emerald-500" />
+                <p>Google検索で最新スコアを収穫中...</p>
+              </div>
+            ) : baseballError ? (
+              <div className="py-6 text-center text-xs text-red-500 bg-red-50 rounded-xl p-2">
+                {baseballError}
+              </div>
+            ) : baseballData ? (
+              <div className="space-y-3.5">
+                <div className="bg-slate-50 px-2.5 py-1.5 rounded-lg text-[10px] text-slate-500 flex justify-between items-center">
+                  <span className="font-semibold">{baseballData.date}</span>
+                  <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full text-[9px] font-medium">Live</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed bg-indigo-50/40 p-2 rounded-lg border border-indigo-100/30">
+                  {baseballData.summary}
+                </p>
+                <div className="space-y-2.5">
+                  {baseballData.games && baseballData.games.length > 0 ? (
+                    baseballData.games.map((game, i) => (
+                      <div key={i} className="border border-slate-100 rounded-xl p-2.5 hover:shadow-sm transition bg-white space-y-1.5">
+                        <div className="flex justify-between items-center text-xs text-slate-400">
+                          <span className="font-bold text-slate-700">{game.homeTeam} VS {game.awayTeam}</span>
+                          <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md text-[9px]">
+                            {game.status}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm font-bold text-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span>{game.homeTeam}</span>
+                            <span className="text-lg font-black text-indigo-600">{game.homeScore || '-'}</span>
+                          </div>
+                          <span className="text-slate-300 text-xs font-normal">ー</span>
+                          <div className="flex items-center gap-2 flex-row-reverse">
+                            <span>{game.awayTeam}</span>
+                            <span className="text-lg font-black text-indigo-600">{game.awayScore || '-'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-400 text-center py-4">本日の対戦スケジュールはありません。</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 text-center py-4">右上の更新アイコンを押して、最新の野球情報を取得してください。</p>
+            )}
           </div>
 
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-            <h3 className="font-bold text-sm mb-2 text-slate-800 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              クラウド最適化
+          {/* Hot Trends Section */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200/60 shadow-sm space-y-3">
+            <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5 pb-2 border-b border-slate-100">
+              <Flame className="w-4 h-4 text-orange-500" />
+              トレンドのタグ
             </h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              <strong>Supabase Auth & Cloudinary</strong> に直結されています。画像変更からアカウント情報の同期、リアルタイム投稿までをスマートに行うことができます。
-            </p>
+            <div className="space-y-3">
+              {[
+                { tag: 'プロ野球', count: '12,504 posts' },
+                { tag: '犬のいる暮らし', count: '8,421 posts' },
+                { tag: '日曜の夜', count: '5,122 posts' },
+                { tag: 'WangWangハック', count: '3,109 posts' },
+                { tag: 'Cloudinary接続', count: '1,894 posts' }
+              ].map((item, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => {
+                    setNewPostText(prev => prev + ` #${item.tag} `);
+                    setActiveTab('home');
+                    showToast(`タグ「#${item.tag}」を入力欄に追加しました！`, 'success');
+                  }}
+                  className="group flex justify-between items-center p-2 rounded-xl hover:bg-slate-50 cursor-pointer transition"
+                >
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition">
+                      #{item.tag}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      {item.count}
+                    </p>
+                  </div>
+                  <PlusSquare className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition opacity-0 group-hover:opacity-100" />
+                </div>
+              ))}
+            </div>
           </div>
         </aside>
 
@@ -1214,6 +1167,7 @@ export default function App() {
       </div>
 
       {/* EDIT PROFILE MODAL */}
+      {}
       {isEditModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
