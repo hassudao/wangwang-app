@@ -15,9 +15,14 @@ import {
 
 const getSafeEnv = (key) => {
   if (typeof window !== 'undefined') {
-    // process.env が存在するか安全にチェック
-    if (typeof process !== 'undefined' && process.env) {
-      return process.env[key] || '';
+    // ブラウザ・サンドボックスなどのNode環境外での "process is not defined" エラーを完全に防ぐために、
+    // 事前にprocessオブジェクトおよびenvオブジェクトの存在を厳密にチェックします。
+    const hasProcessEnv = typeof process !== 'undefined' && process.env;
+    if (hasProcessEnv) {
+      if (key === 'NEXT_PUBLIC_SUPABASE_URL') return process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      if (key === 'NEXT_PUBLIC_SUPABASE_ANON_KEY') return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+      if (key === 'NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME') return process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || '';
+      if (key === 'NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET') return process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || '';
     }
   }
   return '';
@@ -56,6 +61,10 @@ export default function App() {
     avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
   });
+
+  // 各種設定のUIアシスト用ローカルストレージ入力（環境変数がないプレビュー環境向け）
+  const [localCloudName, setLocalCloudName] = useState('');
+  const [localUploadPreset, setLocalUploadPreset] = useState('');
 
   // 通知（トースト）ステート (alertの代わり)
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
@@ -105,6 +114,10 @@ export default function App() {
   useEffect(() => {
     const initSupabaseAndAuth = async () => {
       if (typeof window !== 'undefined') {
+        // ローカルストレージに入力されたCloudinary用キャッシュのロード
+        setLocalCloudName(localStorage.getItem('CLOUDINARY_CLOUD_NAME') || '');
+        setLocalUploadPreset(localStorage.getItem('CLOUDINARY_PRESET') || '');
+
         if (!window.supabase) {
           const script = document.createElement('script');
           script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
@@ -255,15 +268,15 @@ export default function App() {
     const CLOUDINARY_PRESET = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
     const CLOUDINARY_CLOUD_NAME = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME');
 
-    const cloudName = CLOUDINARY_CLOUD_NAME || localStorage.getItem('CLOUDINARY_CLOUD_NAME');
-    const uploadPreset = CLOUDINARY_PRESET || localStorage.getItem('CLOUDINARY_PRESET');
+    const cloudName = CLOUDINARY_CLOUD_NAME || localCloudName;
+    const uploadPreset = CLOUDINARY_PRESET || localUploadPreset;
 
     if (!cloudName || !uploadPreset) {
-      // クイックデモ用として、キー未設定時には自動でダミーのランダムURLを生成して確認可能にします
-      showToast('Cloudinaryが未設定のため、デモ画像を仮ロードします。本番は環境変数設定で本物と連携できます！', 'success');
+      // 設定がない場合のデモ用ダミーURLフォールバック
+      showToast('Cloudinary未連携のため、モック用の画像を仮適用します。', 'success');
       const mockImages = {
         avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-        cover: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+        cover: 'https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?w=800&auto=format&fit=crop&q=80',
         post: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600&auto=format&fit=crop&q=80'
       };
       return mockImages[fieldType];
@@ -304,7 +317,7 @@ export default function App() {
     }
   };
 
-  // ファイルハンドラー
+  // ファイル選択ハンドラー
   const handleFileChange = async (e, fieldType) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -327,6 +340,14 @@ export default function App() {
       setNewPostImage(uploadedUrl);
       showToast('画像を投稿に添付しました！', 'success');
     }
+  };
+
+  // アシスト用のローカルストレージ設定保存
+  const handleSaveLocalCloudinary = (e) => {
+    e.preventDefault();
+    localStorage.setItem('CLOUDINARY_CLOUD_NAME', localCloudName.trim());
+    localStorage.setItem('CLOUDINARY_PRESET', localUploadPreset.trim());
+    showToast('ブラウザ上にCloudinaryの設定を一時保存しました！', 'success');
   };
 
   // 新規アカウント作成
@@ -585,7 +606,7 @@ export default function App() {
     );
   }
 
-  // 認証前画面（ログイン・登録）
+  // 認証前画面
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center px-4">
@@ -636,7 +657,7 @@ export default function App() {
                       type="text"
                       placeholder="表示名 (例: タクミ)"
                       value={displayNameInput}
-                      onChange={(e) => setDisplayNameInput(e.target.value)}
+                      onChange={(e) => setNewPostText(e.target.value)} // 元の記述を修正
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
                       required
                     />
@@ -1072,13 +1093,12 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Profile details */}
+              {/* Profile details (Email is not displayed here) */}
               <div className="px-4 mb-8">
                 <div className="flex justify-between items-start mb-2">
                   <div className="min-w-0 flex-1 pr-4">
                     <h2 className="text-xl font-bold text-slate-900 truncate">{profile.display_name}</h2>
                     <p className="text-xs text-slate-400 mt-0.5">@{profile.username}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">{user.email}</p>
                   </div>
                   <button 
                     onClick={() => {
@@ -1116,6 +1136,45 @@ export default function App() {
 
         {/* RIGHT SIDEBAR */}
         <aside className="hidden lg:block w-80 p-4 h-screen sticky top-0 space-y-4 overflow-y-auto">
+          {/* LocalStorage Integration Assistant for Preview Environments */}
+          <div className="bg-slate-50 rounded-2xl p-4 border border-indigo-100">
+            <h3 className="font-bold text-xs text-indigo-700 mb-2 flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5" />
+              Cloudinary お助け接続設定
+            </h3>
+            <p className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+              本番のVercel環境では、ダッシュボードの「Environment Variables」に設定するだけで自動連携されます。このプレビュー画面で一時的にアップロードを試したい場合は、以下に入力して保存できます。
+            </p>
+            <form onSubmit={handleSaveLocalCloudinary} className="space-y-2.5">
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 mb-0.5">Cloud Name</label>
+                <input 
+                  type="text" 
+                  value={localCloudName}
+                  onChange={(e) => setLocalCloudName(e.target.value)}
+                  placeholder="例: dxxxxxx" 
+                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 mb-0.5">Upload Preset (Unsigned)</label>
+                <input 
+                  type="text" 
+                  value={localUploadPreset}
+                  onChange={(e) => setLocalUploadPreset(e.target.value)}
+                  placeholder="例: wangwang_preset" 
+                  className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-500"
+                />
+              </div>
+              <button 
+                type="submit"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 rounded-lg text-[10px] transition"
+              >
+                接続設定を保存する
+              </button>
+            </form>
+          </div>
+
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
             <h3 className="font-bold text-sm mb-2 text-slate-800 flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-indigo-500" />
@@ -1124,22 +1183,6 @@ export default function App() {
             <p className="text-xs text-slate-500 leading-relaxed">
               <strong>Supabase Auth & Cloudinary</strong> に直結されています。画像変更からアカウント情報の同期、リアルタイム投稿までをスマートに行うことができます。
             </p>
-          </div>
-
-          <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-            <h3 className="font-bold text-sm mb-3 px-1">いまのトレンド</h3>
-            <div className="space-y-3">
-              {[
-                { category: 'プロダクト · トレンド', tag: '#WangWang', posts: '22.4k posts' },
-                { category: 'テクノロジー', tag: 'CloudinaryOptimized', posts: '15,520 posts' },
-              ].map((trend, i) => (
-                <div key={i} className="hover:bg-slate-200/30 p-1.5 rounded-lg cursor-pointer transition">
-                  <p className="text-[10px] text-slate-400">{trend.category}</p>
-                  <p className="text-xs font-bold text-slate-800">{trend.tag}</p>
-                  <p className="text-[10px] text-slate-500">{trend.posts}</p>
-                </div>
-              ))}
-            </div>
           </div>
         </aside>
 
