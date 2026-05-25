@@ -4,14 +4,39 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Home, Search, PlusSquare, MessageCircle, User, 
   Bell, Send, Image as ImageIcon, Heart, MessageSquare, Share2,
-  Sparkles, LogOut, Mail, Lock, UserPlus, LogIn, ChevronLeft, Check
+  Sparkles, LogOut, Mail, Lock, UserPlus, LogIn, ChevronLeft,
+  Camera, Check, X, AlertCircle
 } from 'lucide-react';
 
-// 環境変数からSupabaseの接続情報を取得 (存在しない場合は空)
-const supabaseUrl = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_SUPABASE_URL || '') : '';
-const supabaseAnonKey = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '') : '';
+// SupabaseおよびCloudinaryの情報を動的に安全に解決する
+// プレビューのesbuildで `@supabase/supabase-js` を解決できないビルドエラーを回避するため、
+// windowオブジェクトからCDN経由でロードされたSupabaseに安全にアクセスできるようにし、
+// 設定がない場合のフォールバック（動作確認用ローカルストレージモックモード）も完全に組み込みます。
+
+const getSafeEnv = (key) => {
+  if (typeof window !== 'undefined') {
+    // process.env が存在するか安全にチェック
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env[key] || '';
+    }
+  }
+  return '';
+};
+
+const getSupabaseClient = () => {
+  if (typeof window !== 'undefined' && window.supabase) {
+    const supabaseUrl = getSafeEnv('NEXT_PUBLIC_SUPABASE_URL');
+    const supabaseAnonKey = getSafeEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    if (supabaseUrl && supabaseAnonKey) {
+      return window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    }
+  }
+  return null;
+};
 
 export default function App() {
+  const [supabase, setSupabase] = useState(null);
+
   // 認証関連ステート
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -19,248 +44,371 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
   const [authError, setAuthError] = useState('');
-  const [notification, setNotification] = useState(null); // 自作トースト通知用
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false); // 自作ログアウト確認用
 
   // アプリUI関連ステート
   const [activeTab, setActiveTab] = useState('home');
   const [profile, setProfile] = useState({
+    username: 'guest',
     display_name: 'ゲストユーザー',
     bio: 'WangWangへようこそ！',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
   });
+
+  // 通知（トースト）ステート (alertの代わり)
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+
+  // カスタム確認モーダルステート (confirmの代わり)
+  const [confirmModal, setConfirmModal] = useState({ show: false, message: '', onConfirm: () => {} });
+
+  // プロフィール編集用ステート
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editUsername, setEditUsername] = useState('');
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
+  const [editAvatar, setEditAvatar] = useState('');
+  const [editCover, setEditCover] = useState('');
+
+  // Cloudinaryアップロード処理用ステート
+  const [uploadingField, setUploadingField] = useState(null); // 'avatar' or 'cover' or 'post'
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // ファイル参照用Ref
+  const avatarInputRef = useRef(null);
+  const coverInputRef = useRef(null);
+  const postImageInputRef = useRef(null);
 
   // タイムライン・投稿関連ステート
-  const [posts, setPosts] = useState([
-    {
-      id: 1,
-      user: 'Yui',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
-      text: 'WangWangのデザインがかなり洗練されてて使いやすい！これからお気に入りの場所になりそう。',
-      image: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600',
-      likes: 12,
-      comments: 3,
-      time: '2時間前'
-    },
-    {
-      id: 2,
-      user: 'Ken',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-      text: 'アカウント機能がつくと一気に本格的なSNSらしくなってワクワクするね💻',
-      image: null,
-      likes: 5,
-      comments: 1,
-      time: '5時間前'
-    }
-  ]);
+  const [posts, setPosts] = useState([]);
   const [newPostText, setNewPostText] = useState('');
   const [newPostImage, setNewPostImage] = useState('');
 
   // DM (LINE風) 関連ステート
-  const [selectedChat, setSelectedChat] = useState(null); 
+  const [selectedChat, setSelectedChat] = useState(null); // モバイル用の詳細画面遷移用
   const [chatMessages, setChatMessages] = useState([
     { id: 1, sender: 'Yui', text: 'WangWangに登録したよ！これからよろしくね。', time: '10:24', isMe: false, read: true },
     { id: 2, sender: 'Me', text: 'ありがとう！デザインかなりいい感じに仕上がってきたよ！', time: '10:26', isMe: true, read: true }
   ]);
   const [newMessageText, setNewMessageText] = useState('');
 
-  // Supabaseクライアントの参照 (esbuildエラー回避のために動的ロード)
-  const supabaseRef = useRef(null);
+  // トースト表示関数
+  const showToast = (message, type = 'success') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' });
+    }, 3000);
+  };
 
+  // CDN経由でSupabaseライブラリをブラウザから安全に動的読み込みする
   useEffect(() => {
-    // クライアントサイドでのみSupabase-jsを動的にロードしてコンパイルエラーを回避
-    const loadSupabase = async () => {
+    const initSupabaseAndAuth = async () => {
       if (typeof window !== 'undefined') {
-        try {
-          // すでにロードされているか確認、なければCDNから読み込み
-          if (!window.supabase) {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-            script.async = true;
-            script.onload = () => {
-              initializeSupabase();
-            };
-            document.body.appendChild(script);
-          } else {
-            initializeSupabase();
-          }
-        } catch (e) {
-          console.warn("Supabase load failed, falling back to mock authentication.");
-          setupMockAuth();
+        if (!window.supabase) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+          script.async = true;
+          script.onload = () => {
+            const client = getSupabaseClient();
+            setSupabase(client);
+            setupAuthListener(client);
+          };
+          document.head.appendChild(script);
+        } else {
+          const client = getSupabaseClient();
+          setSupabase(client);
+          setupAuthListener(client);
         }
       }
     };
 
-    const initializeSupabase = () => {
-      if (window.supabase && supabaseUrl && supabaseAnonKey) {
-        try {
-          supabaseRef.current = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
-          setupSupabaseListeners();
-        } catch (err) {
-          setupMockAuth();
-        }
-      } else {
-        // 環境変数がない場合はローカルのモックAuthモード
-        setupMockAuth();
-      }
-    };
-
-    const setupSupabaseListeners = () => {
-      const client = supabaseRef.current;
-      if (!client) return;
-
-      client.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser(session.user);
-          fetchUserProfile(session.user.id);
-        } else {
-          setupMockAuth();
-        }
-      });
-
-      const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          fetchUserProfile(session.user.id);
-        } else {
-          setUser(null);
-          setAuthLoading(false);
-        }
-      });
-
-      return () => subscription.unsubscribe();
-    };
-
-    const setupMockAuth = () => {
-      // ローカルストレージを使用したダミー認証（プレビュー用）
-      const savedUser = localStorage.getItem('wangwang_mock_user');
-      if (savedUser) {
-        const parsed = JSON.parse(savedUser);
-        setUser(parsed);
-        const savedProfile = localStorage.getItem(`wangwang_profile_${parsed.id}`);
-        if (savedProfile) {
-          setProfile(JSON.parse(savedProfile));
-        } else {
-          setProfile({
-            display_name: parsed.email.split('@')[0],
-            bio: 'WangWangへようこそ！',
-            avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-          });
-        }
-      }
-      setAuthLoading(false);
-    };
-
-    loadSupabase();
+    initSupabaseAndAuth();
   }, []);
 
-  const fetchUserProfile = async (userId) => {
-    if (!supabaseRef.current) return;
+  // ログイン状態の監視セットアップ
+  const setupAuthListener = (supabaseClient) => {
+    if (!supabaseClient) {
+      // Supabase環境が未定義の場合はローカルストレージのモックアカウントを使用
+      const mockSession = localStorage.getItem('wangwang_mock_session');
+      if (mockSession) {
+        const parsed = JSON.parse(mockSession);
+        setUser(parsed);
+        fetchUserProfile(parsed.id, null);
+      }
+      setAuthLoading(false);
+      return;
+    }
+
+    // 現在のセッションを取得
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchUserProfile(session.user.id, supabaseClient);
+      }
+      setAuthLoading(false);
+    });
+
+    // 認証状態の変化を監視
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchUserProfile(session.user.id, supabaseClient);
+      } else {
+        resetProfileToGuest();
+      }
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  };
+
+  const resetProfileToGuest = () => {
+    setProfile({
+      username: 'guest',
+      display_name: 'ゲストユーザー',
+      bio: 'WangWangへようこそ！',
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+    });
+  };
+
+  // プロフィールの取得
+  const fetchUserProfile = async (userId, supabaseClient) => {
+    // モックモード
+    if (!supabaseClient) {
+      const storedProfile = localStorage.getItem(`wangwang_profile_${userId}`);
+      if (storedProfile) {
+        const parsed = JSON.parse(storedProfile);
+        setProfile(parsed);
+        setEditUsername(parsed.username || '');
+        setEditName(parsed.display_name || '');
+        setEditBio(parsed.bio || '');
+        setEditAvatar(parsed.avatar_url || '');
+        setEditCover(parsed.cover_url || '');
+      } else {
+        const defaultProfile = {
+          id: userId,
+          username: 'tester',
+          display_name: 'テストユーザー',
+          bio: 'プレビュー検証用モックプロファイルです。',
+          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+        };
+        localStorage.setItem(`wangwang_profile_${userId}`, JSON.stringify(defaultProfile));
+        setProfile(defaultProfile);
+        setEditUsername(defaultProfile.username);
+        setEditName(defaultProfile.display_name);
+        setEditBio(defaultProfile.bio);
+        setEditAvatar(defaultProfile.avatar_url);
+        setEditCover(defaultProfile.cover_url);
+      }
+      return;
+    }
+
+    // 本番Supabaseモード
     try {
-      const { data, error } = await supabaseRef.current
+      const { data, error } = await supabaseClient
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
+      if (error && error.code !== 'PGRST116') throw error;
 
       if (data) {
         setProfile(data);
+        setEditUsername(data.username || '');
         setEditName(data.display_name || '');
         setEditBio(data.bio || '');
+        setEditAvatar(data.avatar_url || '');
+        setEditCover(data.cover_url || '');
       } else {
-        // プロフィールが存在しない場合は作成
+        const defaultUsername = `user_${Math.floor(1000 + Math.random() * 9000)}`;
         const newProfile = {
           id: userId,
-          display_name: email.split('@')[0] || 'ユーザー',
+          username: defaultUsername,
+          display_name: '新しいユーザー',
           bio: 'ステータスメッセージは未設定です。',
-          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
         };
-        const { error: insertError } = await supabaseRef.current
+        const { error: insertError } = await supabaseClient
           .from('profiles')
           .insert([newProfile]);
         
         if (insertError) throw insertError;
         setProfile(newProfile);
+        setEditUsername(newProfile.username);
         setEditName(newProfile.display_name);
         setEditBio(newProfile.bio);
+        setEditAvatar(newProfile.avatar_url);
+        setEditCover(newProfile.cover_url);
       }
     } catch (err) {
       console.error('Profile fetch error:', err.message);
-    } finally {
-      setAuthLoading(false);
     }
   };
 
-  const triggerNotification = (message) => {
-    setNotification(message);
-    setTimeout(() => {
-      setNotification(null);
-    }, 4000);
+  // Cloudinaryへのダイレクトアップロード
+  const uploadToCloudinary = async (file, fieldType) => {
+    const CLOUDINARY_PRESET = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
+    const CLOUDINARY_CLOUD_NAME = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME');
+
+    const cloudName = CLOUDINARY_CLOUD_NAME || localStorage.getItem('CLOUDINARY_CLOUD_NAME');
+    const uploadPreset = CLOUDINARY_PRESET || localStorage.getItem('CLOUDINARY_PRESET');
+
+    if (!cloudName || !uploadPreset) {
+      // クイックデモ用として、キー未設定時には自動でダミーのランダムURLを生成して確認可能にします
+      showToast('Cloudinaryが未設定のため、デモ画像を仮ロードします。本番は環境変数設定で本物と連携できます！', 'success');
+      const mockImages = {
+        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+        cover: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+        post: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=600&auto=format&fit=crop&q=80'
+      };
+      return mockImages[fieldType];
+    }
+
+    setUploadingField(fieldType);
+    setUploadProgress(15);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+
+    try {
+      setUploadProgress(45);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error('Cloudinaryへのアップロードに失敗しました。設定値を確認してください。');
+
+      setUploadProgress(85);
+      const data = await res.json();
+      setUploadProgress(100);
+      
+      setTimeout(() => {
+        setUploadingField(null);
+        setUploadProgress(0);
+      }, 500);
+
+      return data.secure_url;
+    } catch (err) {
+      console.error('Cloudinary Upload Error:', err);
+      showToast(err.message, 'error');
+      setUploadingField(null);
+      setUploadProgress(0);
+      return null;
+    }
   };
 
-  // アカウント作成 (サインアップ)
+  // ファイルハンドラー
+  const handleFileChange = async (e, fieldType) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('ファイルサイズは5MB以下にしてください。', 'error');
+      return;
+    }
+
+    const uploadedUrl = await uploadToCloudinary(file, fieldType);
+    if (!uploadedUrl) return;
+
+    if (fieldType === 'avatar') {
+      setEditAvatar(uploadedUrl);
+      showToast('プロフィール画像を仮適用しました。保存で決定されます。', 'success');
+    } else if (fieldType === 'cover') {
+      setEditCover(uploadedUrl);
+      showToast('ヘッダー画像を仮適用しました。保存で決定されます。', 'success');
+    } else if (fieldType === 'post') {
+      setNewPostImage(uploadedUrl);
+      showToast('画像を投稿に添付しました！', 'success');
+    }
+  };
+
+  // 新規アカウント作成
   const handleSignUp = async (e) => {
     e.preventDefault();
     setAuthError('');
     if (!email || !password) {
-      setAuthError('メールアドレスとパスワードを入力してください。');
+      setAuthError('全ての項目を入力してください。');
       return;
     }
 
-    if (supabaseRef.current) {
-      try {
-        const { data, error } = await supabaseRef.current.auth.signUp({
-          email,
-          password,
-        });
+    const usernameRegex = /^[a-zA-Z0-9_]{3,15}$/;
+    const checkUsername = usernameInput.trim().toLowerCase();
+    if (!usernameRegex.test(checkUsername)) {
+      setAuthError('ユーザーネームは3〜15文字の英数字、またはアンダースコア(_)のみ使用可能です。');
+      return;
+    }
 
-        if (error) throw error;
-
-        if (data?.user) {
-          const newProfile = {
-            id: data.user.id,
-            display_name: displayNameInput || email.split('@')[0],
-            bio: 'WangWangへようこそ！',
-            avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-          };
-
-          const { error: profileError } = await supabaseRef.current
-            .from('profiles')
-            .insert([newProfile]);
-
-          if (profileError) console.error('Profile creation error:', profileError.message);
-          
-          setProfile(newProfile);
-          triggerNotification('アカウント作成が完了しました！');
-        }
-      } catch (err) {
-        setAuthError(err.message);
-      }
-    } else {
-      // モックサインアップ
-      const mockUser = { id: 'mock_' + Date.now(), email };
-      setUser(mockUser);
+    if (!supabase) {
+      // モックモード新規作成
+      const mockUser = { id: `user_${Date.now()}`, email };
+      localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
       const mockProfile = {
-        display_name: displayNameInput || email.split('@')[0],
-        bio: 'WangWangへようこそ！（テスト用モックアカウント）',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+        id: mockUser.id,
+        username: checkUsername,
+        display_name: displayNameInput || '新規ユーザー',
+        bio: 'WangWangへようこそ！',
+        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
       };
-      setProfile(mockProfile);
-      localStorage.setItem('wangwang_mock_user', JSON.stringify(mockUser));
       localStorage.setItem(`wangwang_profile_${mockUser.id}`, JSON.stringify(mockProfile));
-      triggerNotification('アカウントを作成しました（テスト環境）');
+      setUser(mockUser);
+      setProfile(mockProfile);
+      setEditUsername(mockProfile.username);
+      setEditName(mockProfile.display_name);
+      setEditBio(mockProfile.bio);
+      setEditAvatar(mockProfile.avatar_url);
+      setEditCover(mockProfile.cover_url);
+      showToast('テストアカウントを仮作成しました（モック動作）', 'success');
+      return;
+    }
+
+    // 本番Supabase
+    try {
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('username', checkUsername)
+        .maybeSingle();
+
+      if (existingUser) {
+        setAuthError('このユーザーネームはすでに登録されています。');
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+
+      if (data?.user) {
+        const newProfile = {
+          id: data.user.id,
+          username: checkUsername,
+          display_name: displayNameInput || email.split('@')[0],
+          bio: 'WangWangへようこそ！',
+          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          cover_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'
+        };
+
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert([newProfile]);
+
+        if (profileError) console.error(profileError.message);
+        setProfile(newProfile);
+        showToast('アカウント登録に成功しました！', 'success');
+      }
+    } catch (err) {
+      setAuthError(err.message);
     }
   };
 
-  // ログイン (サインイン)
+  // ログイン
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -269,83 +417,109 @@ export default function App() {
       return;
     }
 
-    if (supabaseRef.current) {
-      try {
-        const { error } = await supabaseRef.current.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-      } catch (err) {
-        setAuthError('ログインに失敗しました。認証情報をご確認ください。');
-      }
-    } else {
-      // モックログイン
-      const mockUser = { id: 'mock_default', email };
+    if (!supabase) {
+      // モックモードログイン
+      const mockUser = { id: 'mock_user_123', email };
+      localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
       setUser(mockUser);
-      const mockProfile = {
-        display_name: email.split('@')[0],
-        bio: 'WangWangへようこそ！（テスト用モックアカウント）',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-      };
-      setProfile(mockProfile);
-      localStorage.setItem('wangwang_mock_user', JSON.stringify(mockUser));
-      localStorage.setItem(`wangwang_profile_${mockUser.id}`, JSON.stringify(mockProfile));
-      triggerNotification('ログインしました（テスト環境）');
+      fetchUserProfile(mockUser.id, null);
+      showToast('テストログインしました（プレビューモック）', 'success');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      showToast('ログインしました！', 'success');
+    } catch (err) {
+      setAuthError('ログインに失敗しました。認証情報を確認してください。');
     }
   };
 
-  // ログアウト処理
-  const handleLogout = async () => {
-    if (supabaseRef.current) {
-      await supabaseRef.current.auth.signOut();
-    } else {
-      localStorage.removeItem('wangwang_mock_user');
-      setUser(null);
-    }
-    setShowLogoutConfirm(false);
-    setActiveTab('home');
-    triggerNotification('ログアウトしました');
+  // ログアウト
+  const handleLogout = () => {
+    setConfirmModal({
+      show: true,
+      message: 'ログアウトしてもよろしいですか？',
+      onConfirm: async () => {
+        if (supabase) {
+          await supabase.auth.signOut();
+        } else {
+          localStorage.removeItem('wangwang_mock_session');
+          setUser(null);
+          resetProfileToGuest();
+        }
+        setActiveTab('home');
+        setConfirmModal({ show: false, message: '', onConfirm: () => {} });
+        showToast('ログアウトしました');
+      }
+    });
   };
 
+  // プロフィール編集・送信
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     if (!user) return;
 
+    const usernameRegex = /^[a-zA-Z0-9_]{3,15}$/;
+    const targetUsername = editUsername.trim().toLowerCase();
+    if (!usernameRegex.test(targetUsername)) {
+      showToast('ユーザーネームは3〜15文字の英数字、または_のみ可能です。', 'error');
+      return;
+    }
+
     const updatedProfile = {
-      ...profile,
-      display_name: editName,
-      bio: editBio
+      id: user.id,
+      username: targetUsername,
+      display_name: editName.trim() || profile.display_name,
+      bio: editBio.trim(),
+      avatar_url: editAvatar || profile.avatar_url,
+      cover_url: editCover || profile.cover_url
     };
 
-    if (supabaseRef.current) {
-      try {
-        const { error } = await supabaseRef.current
-          .from('profiles')
-          .upsert(updatedProfile);
-
-        if (error) throw error;
-        setProfile(updatedProfile);
-        setIsEditModalOpen(false);
-        triggerNotification('プロフィールを保存しました');
-      } catch (err) {
-        triggerNotification('更新に失敗しました: ' + err.message);
-      }
-    } else {
-      setProfile(updatedProfile);
+    if (!supabase) {
+      // モックプロフィールのローカル更新
       localStorage.setItem(`wangwang_profile_${user.id}`, JSON.stringify(updatedProfile));
+      setProfile(updatedProfile);
       setIsEditModalOpen(false);
-      triggerNotification('プロフィールを保存しました（テスト環境）');
+      showToast('プロフィールを更新しました！（仮保存）', 'success');
+      return;
+    }
+
+    try {
+      if (targetUsername !== profile.username) {
+        const { data: existingUser } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('username', targetUsername)
+          .maybeSingle();
+
+        if (existingUser) {
+          showToast('このユーザーネームはすでに登録されています。', 'error');
+          return;
+        }
+      }
+
+      const { error } = await supabase.from('profiles').upsert(updatedProfile);
+      if (error) throw error;
+
+      setProfile(updatedProfile);
+      setIsEditModalOpen(false);
+      showToast('プロフィールを更新しました！', 'success');
+    } catch (err) {
+      showToast('プロフィールの更新に失敗しました: ' + err.message, 'error');
     }
   };
 
+  // タイムライン投稿送信
   const handleCreatePost = (e) => {
     e.preventDefault();
-    if (!newPostText.trim()) return;
+    if (!newPostText.trim() && !newPostImage) return;
 
     const newPost = {
       id: Date.now(),
       user: profile.display_name,
+      username: profile.username,
       avatar: profile.avatar_url,
       text: newPostText,
       image: newPostImage || null,
@@ -357,9 +531,19 @@ export default function App() {
     setPosts([newPost, ...posts]);
     setNewPostText('');
     setNewPostImage('');
-    triggerNotification('タイムラインにポストしました！');
   };
 
+  // タイムライン投稿にいいね
+  const toggleLike = (postId) => {
+    setPosts(posts.map(post => {
+      if (post.id === postId) {
+        return { ...post, likes: post.likes + 1 };
+      }
+      return post;
+    }));
+  };
+
+  // メッセージの送信
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessageText.trim()) return;
@@ -380,7 +564,7 @@ export default function App() {
       const replyMessage = {
         id: Date.now() + 1,
         sender: 'Yui',
-        text: 'メッセージ受け取りました！WangWangのリアルタイム設計、最高にスマートですね✨',
+        text: 'メッセージ受け取ったよ！また後で連絡するね。',
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isMe: false,
         read: true
@@ -389,16 +573,7 @@ export default function App() {
         const updated = prev.map(m => m.isMe ? { ...m, read: true } : m);
         return [...updated, replyMessage];
       });
-    }, 1200);
-  };
-
-  const toggleLike = (postId) => {
-    setPosts(posts.map(post => {
-      if (post.id === postId) {
-        return { ...post, likes: post.likes + 1 };
-      }
-      return post;
-    }));
+    }, 1500);
   };
 
   if (authLoading) {
@@ -410,20 +585,17 @@ export default function App() {
     );
   }
 
+  // 認証前画面（ログイン・登録）
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center px-4 relative overflow-hidden">
-        {/* 背景グラデーション演出 */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl"></div>
-
-        <div className="w-full max-w-md bg-slate-900/40 border border-slate-800 p-8 rounded-3xl backdrop-blur-xl shadow-2xl relative z-10">
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-center items-center px-4">
+        <div className="w-full max-w-md bg-slate-900/50 border border-slate-800 p-8 rounded-3xl backdrop-blur-md shadow-2xl">
           
           <div className="flex flex-col items-center mb-8">
             <div className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-3">
               <Sparkles className="w-7 h-7 text-white" />
             </div>
-            <h1 className="text-3xl font-black bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent tracking-tight">WangWang</h1>
+            <h1 className="text-3xl font-black bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">WangWang</h1>
             <p className="text-xs text-slate-400 mt-1">次世代ハイブリッド・ミニマルSNS</p>
           </div>
 
@@ -432,27 +604,45 @@ export default function App() {
           </h2>
 
           {authError && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-3.5 rounded-xl mb-4 leading-relaxed">
-              {authError}
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-3.5 rounded-xl mb-4 leading-relaxed flex items-start gap-2 animate-pulse">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{authError}</span>
             </div>
           )}
 
           <form onSubmit={authMode === 'login' ? handleLogin : handleSignUp} className="space-y-4">
             {authMode === 'signup' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">表示名</label>
-                <div className="relative">
-                  <User className="absolute left-3.5 top-3 w-5 h-5 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="ユーザー名 (例: タクミ)"
-                    value={displayNameInput}
-                    onChange={(e) => setDisplayNameInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
-                    required
-                  />
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">ユーザーネーム (@ID)</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 text-slate-500 font-bold text-sm">@</span>
+                    <input
+                      type="text"
+                      placeholder="username (英数字・3〜15文字)"
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 ml-1">表示名</label>
+                  <div className="relative">
+                    <User className="absolute left-3.5 top-3 w-5 h-5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="表示名 (例: タクミ)"
+                      value={displayNameInput}
+                      onChange={(e) => setDisplayNameInput(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none"
+                      required
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
             <div>
@@ -530,29 +720,19 @@ export default function App() {
     );
   }
 
+  // アプリケーションメイン
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex justify-center relative">
-      
-      {/* 自作トースト通知 */}
-      {notification && (
-        <div className="fixed top-4 right-4 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl z-50 flex items-center gap-2 text-sm border border-slate-800 animate-in fade-in slide-in-from-top-4 duration-300">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{notification}</span>
-        </div>
-      )}
-
-      <div className="w-full max-w-7xl flex relative">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex justify-center">
+      <div className="w-full max-w-7xl flex relative font-sans">
         
-        {/* ========================================================= */}
-        {/* LEFT SIDEBAR: PC & Tablet Navigation                      */}
-        {/* ========================================================= */}
-        <aside className="hidden sm:flex flex-col justify-between items-center xl:items-start p-4 h-screen sticky top-0 w-20 xl:w-64 border-r border-slate-200 bg-white">
+        {/* SIDEBAR */}
+        <aside className="hidden sm:flex flex-col justify-between items-center xl:items-start p-4 h-screen sticky top-0 w-20 xl:w-64 border-r border-slate-200 bg-white z-20">
           <div className="w-full space-y-8">
             <div className="text-2xl font-bold text-indigo-600 px-2 flex items-center gap-2">
-              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-md">
-                <Sparkles className="w-5 h-5" />
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+                <Sparkles className="w-4.5 h-4.5" />
               </div>
-              <span className="hidden xl:inline tracking-tight font-black bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">WangWang</span>
+              <span className="hidden xl:inline tracking-tight font-black">WangWang</span>
             </div>
             
             <nav className="space-y-2 w-full">
@@ -573,11 +753,11 @@ export default function App() {
                     className={`w-full flex items-center gap-4 p-3 rounded-xl transition-all duration-200 ${
                       activeTab === item.id 
                         ? 'bg-indigo-50 text-indigo-600 font-bold' 
-                        : 'hover:bg-slate-50 text-slate-600'
+                        : 'hover:bg-slate-100 text-slate-600'
                     }`}
                   >
                     <Icon className="w-6 h-6 shrink-0" />
-                    <span className="hidden xl:inline text-sm">{item.label}</span>
+                    <span className="hidden xl:inline text-base">{item.label}</span>
                   </button>
                 );
               })}
@@ -586,41 +766,36 @@ export default function App() {
 
           <div 
             onClick={() => setActiveTab('profile')}
-            className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 cursor-pointer border border-slate-100"
+            className="w-full flex items-center justify-between p-2 rounded-xl hover:bg-slate-100 cursor-pointer"
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <img src={profile.avatar_url} alt="avatar" className="w-10 h-10 rounded-full object-cover border border-slate-200" />
-              <div className="hidden xl:block text-left">
-                <p className="font-bold text-xs truncate max-w-[120px]">{profile.display_name}</p>
-                <p className="text-[10px] text-slate-400 truncate max-w-[120px]">{user.email}</p>
+              <div className="hidden xl:block text-left min-w-0 flex-1">
+                <p className="font-bold text-sm truncate">{profile.display_name}</p>
+                <p className="text-xs text-slate-400 truncate">@{profile.username}</p>
               </div>
             </div>
           </div>
         </aside>
 
-        {/* ========================================================= */}
-        {/* MAIN CONTENT AREA                                         */}
-        {/* ========================================================= */}
+        {/* MAIN AREA */}
         <main className="flex-1 min-h-screen pb-16 sm:pb-0 border-r border-slate-200 bg-white max-w-2xl">
           
-          {/* Mobile Top Header */}
-          <header className="sm:hidden flex justify-between items-center px-4 h-14 border-b border-slate-200 sticky top-0 bg-white/90 backdrop-blur-md z-30">
-            <h1 className="text-xl font-black bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent tracking-tight flex items-center gap-1.5">
+          {/* Header Mobile */}
+          <header className="sm:hidden flex justify-between items-center px-4 h-14 border-b border-slate-100 sticky top-0 bg-white/80 backdrop-blur-md z-10">
+            <h1 className="text-xl font-black text-indigo-600 tracking-tight flex items-center gap-1.5">
               <Sparkles className="w-5 h-5 text-indigo-600" />
               WangWang
             </h1>
-            <div className="flex items-center gap-4">
-              <button onClick={() => setActiveTab('chat')} className="p-1 text-slate-600 relative">
-                <MessageCircle className="w-6 h-6" />
-                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></span>
-              </button>
-            </div>
+            <button onClick={() => setActiveTab('chat')} className="p-1 text-slate-600 relative">
+              <MessageCircle className="w-6 h-6" />
+              <span className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+            </button>
           </header>
 
-          {/* ─── TIMELINE TAB ─── */}
+          {/* ─── HOME TAB CONTENT ─── */}
           {activeTab === 'home' && (
             <div className="divide-y divide-slate-100">
-              
               <div className="p-4 bg-white border-b border-slate-100">
                 <div className="flex gap-3">
                   <img src={profile.avatar_url} alt="avatar" className="w-10 h-10 rounded-full object-cover border border-slate-100" />
@@ -632,20 +807,43 @@ export default function App() {
                         placeholder="今なにしてる？" 
                         className="w-full resize-none border-none focus:ring-0 text-sm placeholder-slate-400 min-h-[70px] outline-none"
                       />
-                      <div className="mb-3">
-                        <input 
-                          type="text"
-                          placeholder="画像のURLを追加 (任意)"
-                          value={newPostImage}
-                          onChange={(e) => setNewPostImage(e.target.value)}
-                          className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none focus:border-indigo-300 transition"
-                        />
-                      </div>
-                      <div className="flex justify-between items-center pt-2.5 border-t border-slate-100">
-                        <span className="text-[11px] text-slate-400">画像URLを入れてビジュアル投稿！</span>
+                      
+                      {newPostImage && (
+                        <div className="relative rounded-xl overflow-hidden mb-3 max-h-48 border border-slate-200 group">
+                          <img src={newPostImage} alt="Upload preview" className="w-full h-full object-cover" />
+                          <button 
+                            type="button"
+                            onClick={() => setNewPostImage('')}
+                            className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white p-1.5 rounded-full transition"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <button 
+                            type="button"
+                            onClick={() => postImageInputRef.current?.click()}
+                            className="text-indigo-500 hover:bg-indigo-50 p-2 rounded-full transition"
+                          >
+                            <Camera className="w-5 h-5" />
+                          </button>
+                          <input 
+                            type="file" 
+                            ref={postImageInputRef}
+                            onChange={(e) => handleFileChange(e, 'post')}
+                            accept="image/*"
+                            className="hidden"
+                          />
+                          {uploadingField === 'post' && (
+                            <span className="text-xs text-indigo-500 animate-pulse">アップロード中 ({uploadProgress}%)</span>
+                          )}
+                        </div>
                         <button 
                           type="submit"
-                          className="bg-indigo-600 text-white px-5 py-1.5 rounded-full font-bold text-xs hover:bg-indigo-700 active:scale-95 transition shadow-sm shadow-indigo-100"
+                          className="bg-indigo-600 text-white px-5 py-2 rounded-full font-bold text-xs hover:bg-indigo-700 active:scale-95 transition"
                         >
                           ポスト
                         </button>
@@ -657,81 +855,88 @@ export default function App() {
 
               {/* Feed List */}
               <div className="bg-slate-50 sm:bg-transparent">
-                {posts.map((post) => (
-                  <article key={post.id} className="p-4 bg-white border-b border-slate-100 transition hover:bg-slate-50/20">
-                    <div className="flex gap-3">
-                      <img src={post.avatar} alt={post.user} className="w-10 h-10 rounded-full object-cover border border-slate-100" />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span className="font-bold text-sm hover:underline cursor-pointer">{post.user}</span>
-                          <span className="text-xs text-slate-400">· {post.time}</span>
-                        </div>
-                        
-                        <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap">{post.text}</p>
-                        
-                        {post.image && (
-                          <div className="rounded-2xl overflow-hidden border border-slate-100 mb-3 max-h-96 bg-slate-100">
-                            <img src={post.image} alt="Post media" className="w-full h-full object-cover" />
+                {posts.length === 0 ? (
+                  <div className="py-20 text-center px-4">
+                    <p className="text-sm text-slate-400">タイムラインはまだ空っぽです。</p>
+                    <p className="text-xs text-slate-400 mt-1">カメラマークから画像をアップロードして、最初の1件を投稿しましょう！</p>
+                  </div>
+                ) : (
+                  posts.map((post) => (
+                    <article key={post.id} className="p-4 bg-white border-b border-slate-100 transition hover:bg-slate-50/30">
+                      <div className="flex gap-3">
+                        <img src={post.avatar} alt={post.user} className="w-10 h-10 rounded-full object-cover border border-slate-100" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            <span className="font-bold text-sm hover:underline cursor-pointer">{post.user}</span>
+                            <span className="text-xs text-slate-400">@{post.username}</span>
+                            <span className="text-xs text-slate-400">· {post.time}</span>
                           </div>
-                        )}
+                          
+                          <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap text-slate-800">{post.text}</p>
+                          
+                          {post.image && (
+                            <div className="rounded-2xl overflow-hidden border border-slate-100 mb-3 max-h-96 bg-slate-100">
+                              <img src={post.image} alt="Post media" className="w-full h-full object-cover hover:scale-101 transition-transform duration-300" />
+                            </div>
+                          )}
 
-                        <div className="flex justify-between items-center text-slate-400 max-w-xs pt-1">
-                          <button 
-                            onClick={() => toggleLike(post.id)}
-                            className="flex items-center gap-1.5 hover:text-pink-500 transition group"
-                          >
-                            <div className="p-1.5 group-hover:bg-pink-50 rounded-full transition">
-                              <Heart className="w-4 h-4" />
-                            </div>
-                            <span className="text-xs">{post.likes}</span>
-                          </button>
-                          <button className="flex items-center gap-1.5 hover:text-indigo-500 transition group">
-                            <div className="p-1.5 group-hover:bg-indigo-50 rounded-full transition">
-                              <MessageSquare className="w-4 h-4" />
-                            </div>
-                            <span className="text-xs">{post.comments}</span>
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setActiveTab('chat');
-                              setSelectedChat('Yui');
-                            }}
-                            className="flex items-center gap-1.5 hover:text-green-500 transition group"
-                          >
-                            <div className="p-1.5 group-hover:bg-green-50 rounded-full transition">
-                              <Share2 className="w-4 h-4" />
-                            </div>
-                          </button>
+                          <div className="flex justify-between items-center text-slate-400 max-w-xs pt-1">
+                            <button 
+                              onClick={() => toggleLike(post.id)}
+                              className="flex items-center gap-1.5 hover:text-pink-500 transition group"
+                            >
+                              <div className="p-1.5 group-hover:bg-pink-50 rounded-full">
+                                <Heart className="w-4 h-4" />
+                              </div>
+                              <span className="text-xs">{post.likes}</span>
+                            </button>
+                            <button className="flex items-center gap-1.5 hover:text-indigo-500 transition group">
+                              <div className="p-1.5 group-hover:bg-indigo-50 rounded-full">
+                                <MessageSquare className="w-4 h-4" />
+                              </div>
+                              <span className="text-xs">{post.comments}</span>
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setActiveTab('chat');
+                                setSelectedChat('Yui');
+                              }}
+                              className="flex items-center gap-1.5 hover:text-green-500 transition group"
+                            >
+                              <div className="p-1.5 group-hover:bg-green-50 rounded-full">
+                                <Share2 className="w-4 h-4" />
+                              </div>
+                            </button>
+                          </div>
                         </div>
-
                       </div>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  ))
+                )}
               </div>
             </div>
           )}
 
-          {/* ─── GRID TAB ─── */}
+          {/* ─── GRID TAB CONTENT ─── */}
           {activeTab === 'grid' && (
             <div className="p-4">
               <div className="mb-6">
                 <h2 className="text-lg font-bold text-slate-900">フォトギャラリー</h2>
-                <p className="text-xs text-slate-400 mt-0.5">ビジュアルコンテンツが整然と並ぶギャラリースペースです。</p>
+                <p className="text-xs text-slate-400 mt-0.5">画像付きのビジュアルな投稿だけが美しく並びます。</p>
               </div>
 
               {posts.filter(p => p.image).length === 0 ? (
                 <div className="py-20 text-center">
                   <ImageIcon className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <p className="text-sm text-slate-400">表示できる画像がありません。</p>
+                  <p className="text-sm text-slate-400">画像付き投稿がありません。</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
+                <div className="grid grid-cols-3 gap-1 sm:gap-2">
                   {posts.filter(p => p.image).map((post) => (
                     <div 
                       key={post.id} 
                       onClick={() => setActiveTab('home')}
-                      className="aspect-square relative group overflow-hidden rounded-2xl bg-slate-100 cursor-pointer border border-slate-100"
+                      className="aspect-square relative group overflow-hidden rounded-lg bg-slate-100 cursor-pointer border border-slate-100"
                     >
                       <img src={post.image} alt="Grid post" className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white">
@@ -746,52 +951,53 @@ export default function App() {
             </div>
           )}
 
-          {/* ─── CHAT TAB ─── */}
+          {/* ─── CHAT TAB CONTENT ─── */}
           {activeTab === 'chat' && (
             <div className="h-[calc(100vh-3.5rem)] sm:h-screen flex flex-col bg-slate-50">
               <div className="flex-1 flex overflow-hidden">
                 
+                {/* Talk List */}
                 <div className={`w-full sm:w-80 border-r border-slate-200 bg-white flex flex-col ${selectedChat ? 'hidden sm:flex' : 'flex'}`}>
-                  <div className="p-4 border-b border-slate-100 bg-white">
+                  <div className="p-4 border-b border-slate-100 bg-white flex items-center justify-between">
                     <h2 className="text-lg font-bold">トーク</h2>
                   </div>
                   <div className="flex-1 overflow-y-auto">
                     <div 
                       onClick={() => setSelectedChat('Yui')}
-                      className={`flex items-center gap-3 p-3.5 cursor-pointer transition border-b border-slate-50 ${selectedChat === 'Yui' ? 'bg-indigo-50/70' : 'hover:bg-slate-50'}`}
+                      className={`flex items-center gap-3 p-3 cursor-pointer transition border-b border-slate-50 ${selectedChat === 'Yui' ? 'bg-indigo-50/70' : 'hover:bg-slate-50'}`}
                     >
-                      <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100" alt="Yui" className="w-11 h-11 rounded-full object-cover border border-slate-100" />
+                      <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=60" alt="Yui" className="w-11 h-11 rounded-full object-cover" />
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-center mb-0.5">
                           <span className="font-bold text-sm">Yui</span>
                           <span className="text-[10px] text-slate-400">10:26</span>
                         </div>
                         <p className="text-xs text-slate-500 truncate">
-                          {chatMessages[chatMessages.length - 1]?.text}
+                          {chatMessages[chatMessages.length - 1]?.text || 'こんにちは！'}
                         </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Talk Area (LINE-style) */}
+                {/* Talk Window */}
                 <div className={`flex-1 flex flex-col bg-[#8aa4ca] ${!selectedChat ? 'hidden sm:flex justify-center items-center text-slate-200' : 'flex'}`}>
                   {selectedChat ? (
                     <>
-                      <div className="h-14 bg-white/95 border-b border-slate-200 px-4 flex items-center gap-3 shrink-0 z-10">
+                      <div className="h-14 bg-white/95 border-b border-slate-100 px-4 flex items-center gap-3 shrink-0">
                         <button 
                           onClick={() => setSelectedChat(null)} 
                           className="sm:hidden text-slate-600 p-1 hover:bg-slate-100 rounded-full"
                         >
                           <ChevronLeft className="w-6 h-6" />
                         </button>
-                        <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100" alt="Yui" className="w-9 h-9 rounded-full object-cover" />
+                        <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=60" alt="Yui" className="w-9 h-9 rounded-full object-cover" />
                         <span className="font-bold text-sm text-slate-800">Yui</span>
                       </div>
 
                       <div className="flex-1 overflow-y-auto p-4 space-y-4">
                         <div className="flex justify-center">
-                          <span className="text-[10px] bg-black/15 text-white/90 px-3 py-1 rounded-full font-semibold">今日</span>
+                          <span className="text-[10px] bg-black/15 text-white/90 px-3 py-1 rounded-full font-medium">今日</span>
                         </div>
 
                         {chatMessages.map((msg) => (
@@ -800,7 +1006,7 @@ export default function App() {
                             className={`flex items-end gap-2 max-w-[85%] ${msg.isMe ? 'ml-auto flex-row-reverse' : ''}`}
                           >
                             {!msg.isMe && (
-                              <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100" alt="Yui" className="w-8 h-8 rounded-full object-cover self-start mt-1 border border-white" />
+                              <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=60" alt="Yui" className="w-8 h-8 rounded-full object-cover self-start mt-1" />
                             )}
                             <div>
                               {!msg.isMe && <p className="text-[10px] text-white/80 ml-1 mb-0.5">Yui</p>}
@@ -826,7 +1032,7 @@ export default function App() {
                           placeholder="メッセージを入力..." 
                           value={newMessageText}
                           onChange={(e) => setNewMessageText(e.target.value)}
-                          className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500/10 focus:bg-white outline-none transition"
+                          className="flex-1 bg-slate-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500/10 focus:bg-white outline-none transition"
                         />
                         <button 
                           type="submit"
@@ -837,10 +1043,9 @@ export default function App() {
                       </form>
                     </>
                   ) : (
-                    <div className="text-center p-8 bg-black/10 rounded-2xl mx-4">
+                    <div className="text-center p-8 bg-black/10 rounded-2xl">
                       <MessageCircle className="w-12 h-12 text-white/60 mx-auto mb-2" />
-                      <p className="text-sm font-semibold">会話をスタートしましょう</p>
-                      <p className="text-xs text-white/60 mt-1">左のリストからチャットルームを選択してトークを開始できます。</p>
+                      <p className="text-sm font-medium">会話をはじめましょう</p>
                     </div>
                   )}
                 </div>
@@ -849,11 +1054,15 @@ export default function App() {
             </div>
           )}
 
-          {/* ─── PROFILE TAB ─── */}
+          {/* ─── PROFILE TAB CONTENT ─── */}
           {activeTab === 'profile' && (
             <div className="p-4 bg-white">
               
-              <div className="relative h-32 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl mb-14">
+              {/* Cover Header */}
+              <div 
+                className="relative h-44 bg-slate-100 rounded-2xl mb-14 overflow-hidden bg-cover bg-center"
+                style={{ backgroundImage: `url(${profile.cover_url})` }}
+              >
                 <div className="absolute -bottom-10 left-4">
                   <img 
                     src={profile.avatar_url} 
@@ -863,32 +1072,37 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Profile details */}
               <div className="px-4 mb-8">
                 <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">{profile.display_name}</h2>
+                  <div className="min-w-0 flex-1 pr-4">
+                    <h2 className="text-xl font-bold text-slate-900 truncate">{profile.display_name}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">@{profile.username}</p>
                     <p className="text-xs text-slate-400 mt-0.5">{user.email}</p>
                   </div>
                   <button 
                     onClick={() => {
+                      setEditUsername(profile.username);
                       setEditName(profile.display_name);
                       setEditBio(profile.bio);
+                      setEditAvatar(profile.avatar_url);
+                      setEditCover(profile.cover_url);
                       setIsEditModalOpen(true);
                     }}
-                    className="border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold px-4 py-2 rounded-xl text-xs transition"
+                    className="border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold px-4 py-2.5 rounded-xl text-xs transition shrink-0"
                   >
                     プロフィールを編集
                   </button>
                 </div>
                 <p className="text-sm text-slate-600 leading-relaxed mt-4 whitespace-pre-wrap">
-                  {profile.bio}
+                  {profile.bio || '自己紹介文はまだ設定されていません。'}
                 </p>
               </div>
 
               <div className="border-t border-slate-100 pt-6 px-4">
                 <button 
-                  onClick={() => setShowLogoutConfirm(true)}
-                  className="flex items-center gap-2 text-sm text-red-500 font-bold hover:bg-red-50 px-4 py-2.5 rounded-xl transition w-full"
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 text-sm text-red-500 font-bold hover:bg-red-50 px-4 py-3 rounded-xl transition w-full"
                 >
                   <LogOut className="w-5 h-5" />
                   サインアウト (ログアウト)
@@ -900,17 +1114,15 @@ export default function App() {
 
         </main>
 
-        {/* ========================================================= */}
-        {/* RIGHT SIDEBAR: PC Trend & Recommendation                  */}
-        {/* ========================================================= */}
+        {/* RIGHT SIDEBAR */}
         <aside className="hidden lg:block w-80 p-4 h-screen sticky top-0 space-y-4 overflow-y-auto">
           <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
             <h3 className="font-bold text-sm mb-2 text-slate-800 flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-indigo-500" />
-              アカウント連携中
+              クラウド最適化
             </h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              現在、<strong>Supabase Auth</strong> を通じて安全に認証されています。アカウント作成やログインステートは正常に同期されます。
+              <strong>Supabase Auth & Cloudinary</strong> に直結されています。画像変更からアカウント情報の同期、リアルタイム投稿までをスマートに行うことができます。
             </p>
           </div>
 
@@ -919,8 +1131,7 @@ export default function App() {
             <div className="space-y-3">
               {[
                 { category: 'プロダクト · トレンド', tag: '#WangWang', posts: '22.4k posts' },
-                { category: 'データベース', tag: 'SupabaseAuth', posts: '15,520 posts' },
-                { category: 'テクノロジー', tag: 'NextJS14', posts: '8,120 posts' },
+                { category: 'テクノロジー', tag: 'CloudinaryOptimized', posts: '15,520 posts' },
               ].map((trend, i) => (
                 <div key={i} className="hover:bg-slate-200/30 p-1.5 rounded-lg cursor-pointer transition">
                   <p className="text-[10px] text-slate-400">{trend.category}</p>
@@ -932,9 +1143,7 @@ export default function App() {
           </div>
         </aside>
 
-        {/* ========================================================= */}
-        {/* BOTTOM NAVIGATION: Mobile Only                            */}
-        {/* ========================================================= */}
+        {/* BOTTOM NAV */}
         <nav className="sm:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/90 backdrop-blur-md border-t border-slate-200 flex justify-around items-center px-2 z-10">
           {[
             { id: 'home', icon: Home },
@@ -960,43 +1169,108 @@ export default function App() {
 
       </div>
 
-      {/* ========================================================= */}
-      {/* EDIT PROFILE MODAL                                        */}
-      {/* ========================================================= */}
+      {/* EDIT PROFILE MODAL */}
       {isEditModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">プロフィールの編集</h3>
-            <form onSubmit={handleProfileUpdate} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">表示名</label>
+          <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            
+            <div 
+              className="relative h-32 bg-slate-100 bg-cover bg-center"
+              style={{ backgroundImage: `url(${editCover})` }}
+            >
+              <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                <button 
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="bg-white/20 hover:bg-white/40 text-white rounded-full p-2.5 transition flex items-center gap-1.5 text-xs font-bold backdrop-blur-md"
+                >
+                  <Camera className="w-4.5 h-4.5" />
+                  カバー画像を編集
+                </button>
                 <input 
-                  type="text" 
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:border-indigo-500 outline-none transition"
-                  required
+                  type="file" 
+                  ref={coverInputRef}
+                  onChange={(e) => handleFileChange(e, 'cover')}
+                  accept="image/*"
+                  className="hidden"
                 />
               </div>
+
+              <div className="absolute -bottom-8 left-6">
+                <div className="relative w-20 h-20 rounded-full border-4 border-white shadow-md bg-white overflow-hidden group">
+                  <img src={editAvatar} alt="Edit Avatar" className="w-full h-full object-cover" />
+                  <button 
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                  >
+                    <Camera className="w-5 h-5" />
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={avatarInputRef}
+                    onChange={(e) => handleFileChange(e, 'avatar')}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {(uploadingField === 'avatar' || uploadingField === 'cover') && (
+              <div className="bg-indigo-600 text-white text-xs px-4 py-2 flex items-center justify-between">
+                <span>画像をクラウドへ送信中...</span>
+                <span className="font-bold">{uploadProgress}%</span>
+              </div>
+            )}
+
+            <form onSubmit={handleProfileUpdate} className="p-6 pt-12 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">ユーザーネーム (@ID)</label>
+                  <input 
+                    type="text" 
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    placeholder="3-15文字の半角英数字と_"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:bg-white outline-none transition font-mono"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">表示名</label>
+                  <input 
+                    type="text" 
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="表示するお名前"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:bg-white outline-none transition"
+                    required
+                  />
+                </div>
+              </div>
+              
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">自己紹介 / ステータス</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">自己紹介 / ステータス</label>
                 <textarea 
                   value={editBio}
                   onChange={(e) => setEditBio(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:border-indigo-500 outline-none transition resize-none"
+                  placeholder="ここに自己紹介を入力してください"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm min-h-[80px] focus:border-indigo-500 focus:bg-white outline-none transition resize-none"
                 />
               </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button 
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 transition"
                 >
                   キャンセル
                 </button>
                 <button 
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition"
                 >
                   保存する
                 </button>
@@ -1006,29 +1280,35 @@ export default function App() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* LOGOUT CONFIRM MODAL (自作 confirm モーダル)                */}
-      {/* ========================================================= */}
-      {showLogoutConfirm && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center">
-            <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-              <LogOut className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-2">ログアウトしますか？</h3>
-            <p className="text-xs text-slate-500 mb-6">セッションが終了し、再度ログイン画面に戻ります。</p>
-            <div className="flex gap-3">
+      {/* TOAST */}
+      {toast.show && (
+        <div className="fixed bottom-20 sm:bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 duration-300">
+          <div className={`px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm font-semibold text-white ${
+            toast.type === 'error' ? 'bg-red-500' : 'bg-slate-900'
+          }`}>
+            <Check className="w-4 h-4 text-emerald-400" />
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM MODAL */}
+      {confirmModal.show && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200 text-center">
+            <h4 className="text-sm font-bold text-slate-800 mb-4">{confirmModal.message}</h4>
+            <div className="flex justify-center gap-3">
               <button 
-                onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 border border-slate-200 text-slate-600 p-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition"
+                onClick={() => setConfirmModal({ show: false, message: '', onConfirm: () => {} })}
+                className="px-4 py-2 rounded-lg border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50"
               >
                 キャンセル
               </button>
               <button 
-                onClick={handleLogout}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-xl text-sm font-bold transition shadow-md shadow-red-100"
+                onClick={confirmModal.onConfirm}
+                className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-bold"
               >
-                ログアウト
+                実行する
               </button>
             </div>
           </div>
