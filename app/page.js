@@ -1080,11 +1080,12 @@ export default function App() {
             <div className="p-4 bg-white">
               
               {/* Cover Header */}
-              <div 
-                className="relative h-44 bg-slate-100 rounded-2xl mb-14 overflow-hidden bg-cover bg-center"
-                style={{ backgroundImage: `url(${profile.cover_url})` }}
-              >
-                <div className="absolute -bottom-10 left-4">
+              <div className="relative mb-14">
+                <div 
+                  className="h-44 bg-slate-100 rounded-2xl bg-cover bg-center"
+                  style={{ backgroundImage: `url(${profile.cover_url})` }}
+                />
+                <div className="absolute -bottom-10 left-4 z-10">
                   <img 
                     src={profile.avatar_url} 
                     alt="avatar" 
