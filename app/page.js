@@ -34,7 +34,6 @@ const getSupabaseClient = () => {
 
 export default function App() {
   const [supabase, setSupabase] = useState(null);
-
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
@@ -47,9 +46,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [profile, setProfile] = useState({
     username: 'guest_user',
-    display_name: 'ゲストワンちゃん',
-    bio: 'WangWangへようこそ！新しいハイブリッドなSNS空間を一緒に作っていこう🐾',
-    avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80', // 犬アバター
+    display_name: 'ゲストユーザー',
+    bio: 'WangWangへようこそ！投稿してみましょう🐾',
+    avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
     cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
   });
 
@@ -96,41 +95,17 @@ export default function App() {
   useEffect(() => {
     const initApp = async () => {
       if (typeof window !== 'undefined') {
-        // デフォルトの投稿データをLocalStorageから取得、存在しない場合は初期モックを表示
-        const storedPosts = localStorage.getItem('wangwang_local_posts_v2');
+        // デフォルト投稿データはモックを表示せず、LocalStorageに保存分があればロード、無ければ完全な空から開始
+        const storedPosts = localStorage.getItem('wangwang_local_posts_v3');
         if (storedPosts) {
           try {
             setPosts(JSON.parse(storedPosts));
           } catch(e) {
             console.error(e);
+            setPosts([]);
           }
         } else {
-          const defaultPosts = [
-            {
-              id: 1,
-              user: 'ワンちゃん隊長',
-              username: 'dog_captain',
-              avatar: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
-              text: 'WangWangへようこそ！このアプリは、投稿内容をリロードしても消えずに保存される仕組みがしっかりと組まれているよ！お気軽に投稿を試してみてね🐾',
-              image: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?w=600&auto=format&fit=crop&q=80',
-              likes: 12,
-              comments: 3,
-              time: '1時間前'
-            },
-            {
-              id: 2,
-              user: 'ユイ',
-              username: 'yui_wang',
-              avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-              text: 'ハイブリッドSNS、動きが軽快でチャットも使いやすい！デザインもモダンで可愛いですね。',
-              image: null,
-              likes: 5,
-              comments: 1,
-              time: '3時間前'
-            }
-          ];
-          setPosts(defaultPosts);
-          localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(defaultPosts));
+          setPosts([]); // モックの投稿を表示しないよう完全に空配列をセット
         }
 
         // Supabase の CDN スクリプト読み込み
@@ -150,7 +125,7 @@ export default function App() {
           setupAuthListener(client);
         }
 
-        // 初回ロード時にプロ野球データを自動取得
+        // 初回ロード時に野球データを取得
         fetchTodayBaseballResults();
       }
     };
@@ -231,7 +206,7 @@ export default function App() {
 
   const setupAuthListener = (supabaseClient) => {
     if (!supabaseClient) {
-      const mockSession = localStorage.getItem('wangwang_mock_session');
+      const mockSession = localStorage.getItem('wangwang_mock_session_v3');
       if (mockSession) {
         const parsed = JSON.parse(mockSession);
         setUser(parsed);
@@ -262,9 +237,19 @@ export default function App() {
     return () => subscription.unsubscribe();
   };
 
+  const resetProfileToGuest = () => {
+    setProfile({
+      username: 'guest_user',
+      display_name: 'ゲストワンちゃん',
+      bio: 'WangWangへようこそ！新しいハイブリッドなSNS空間を一緒に作っていこう🐾',
+      avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
+      cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
+    });
+  };
+
   const fetchUserProfile = async (userId, supabaseClient) => {
     if (!supabaseClient) {
-      const storedProfile = localStorage.getItem(`wangwang_profile_${userId}`);
+      const storedProfile = localStorage.getItem(`wangwang_profile_v3_${userId}`);
       if (storedProfile) {
         const parsed = JSON.parse(storedProfile);
         setProfile(parsed);
@@ -282,7 +267,7 @@ export default function App() {
           avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
           cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
         };
-        localStorage.setItem(`wangwang_profile_${userId}`, JSON.stringify(defaultProfile));
+        localStorage.setItem(`wangwang_profile_v3_${userId}`, JSON.stringify(defaultProfile));
         setProfile(defaultProfile);
         setEditUsername(defaultProfile.username);
         setEditName(defaultProfile.display_name);
@@ -340,8 +325,8 @@ export default function App() {
     const CLOUDINARY_PRESET = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
     const CLOUDINARY_CLOUD_NAME = getSafeEnv('NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME');
 
-    const cloudName = CLOUDINARY_CLOUD_NAME || localCloudName;
-    const uploadPreset = CLOUDINARY_PRESET || localUploadPreset;
+    const cloudName = CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = CLOUDINARY_PRESET;
 
     if (!cloudName || !uploadPreset) {
       showToast('Cloudinaryが未設定のため、デモ用画像を仮選択しました！', 'success');
@@ -429,7 +414,7 @@ export default function App() {
 
     if (!supabase) {
       const mockUser = { id: `user_${Date.now()}`, email };
-      localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
+      localStorage.setItem('wangwang_mock_session_v3', JSON.stringify(mockUser));
       const mockProfile = {
         id: mockUser.id,
         username: checkUsername,
@@ -438,7 +423,7 @@ export default function App() {
         avatar_url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=150&auto=format&fit=crop&q=80',
         cover_url: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop&q=80'
       };
-      localStorage.setItem(`wangwang_profile_${mockUser.id}`, JSON.stringify(mockProfile));
+      localStorage.setItem(`wangwang_profile_v3_${mockUser.id}`, JSON.stringify(mockProfile));
       setUser(mockUser);
       setProfile(mockProfile);
       setEditUsername(mockProfile.username);
@@ -498,7 +483,7 @@ export default function App() {
 
     if (!supabase) {
       const mockUser = { id: 'mock_user_123', email };
-      localStorage.setItem('wangwang_mock_session', JSON.stringify(mockUser));
+      localStorage.setItem('wangwang_mock_session_v3', JSON.stringify(mockUser));
       setUser(mockUser);
       fetchUserProfile(mockUser.id, null);
       showToast('テストログインしました（プレビューモック）', 'success');
@@ -512,6 +497,24 @@ export default function App() {
     } catch (err) {
       setAuthError('ログインに失敗しました。認証情報をご確認ください。');
     }
+  };
+
+  const handleLogout = () => {
+    setConfirmModal({
+      show: true,
+      message: 'サインアウトしてもよろしいですか？',
+      onConfirm: async () => {
+        if (supabase) {
+          await supabase.auth.signOut();
+        } else {
+          localStorage.removeItem('wangwang_mock_session_v3');
+          setUser(null);
+          resetProfileToGuest();
+        }
+        setConfirmModal({ show: false, message: '', onConfirm: () => {} });
+        showToast('ログアウトしました');
+      }
+    });
   };
 
   const handleProfileUpdate = async (e) => {
@@ -535,7 +538,7 @@ export default function App() {
     };
 
     if (!supabase) {
-      localStorage.setItem(`wangwang_profile_${user.id}`, JSON.stringify(updatedProfile));
+      localStorage.setItem(`wangwang_profile_v3_${user.id}`, JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
       setIsEditModalOpen(false);
       showToast('プロフィールを更新しました！（仮保存）', 'success');
@@ -585,8 +588,8 @@ export default function App() {
 
     const updatedPosts = [newPost, ...posts];
     setPosts(updatedPosts);
-    // リロードしても消えないように即座にLocalStorageへ保存
-    localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(updatedPosts));
+    // 永続化
+    localStorage.setItem('wangwang_local_posts_v3', JSON.stringify(updatedPosts));
 
     setNewPostText('');
     setNewPostImage('');
@@ -601,7 +604,7 @@ export default function App() {
       return post;
     });
     setPosts(updatedPosts);
-    localStorage.setItem('wangwang_local_posts_v2', JSON.stringify(updatedPosts));
+    localStorage.setItem('wangwang_local_posts_v3', JSON.stringify(updatedPosts));
   };
 
   const handleSendMessage = (e) => {
@@ -635,6 +638,122 @@ export default function App() {
       });
     }, 1500);
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
+          <p className="text-sm font-semibold text-slate-500">WangWangを起動中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 py-12 text-white">
+        <div className="w-full max-w-md bg-slate-800/80 p-8 rounded-3xl border border-slate-700/60 shadow-2xl backdrop-blur-md">
+          <div className="text-center space-y-2 mb-8">
+            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mx-auto shadow-lg shadow-indigo-500/20">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-black tracking-tight">WangWang</h1>
+            <p className="text-xs text-slate-400">次世代ハイブリッド・ミニマルSNS空間 🐾</p>
+          </div>
+
+          {authError && (
+            <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 mb-5 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={authMode === 'login' ? handleLogin : handleSignUp} className="space-y-4">
+            {authMode === 'signup' && (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5 ml-1">ユーザーネーム (@ID)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-sm text-slate-500 font-bold font-mono">@</span>
+                    <input 
+                      type="text"
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      placeholder="半角英数字と_のみ (3〜15文字)"
+                      className="w-full bg-slate-950/80 border border-slate-700 rounded-xl pl-8 pr-4 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none text-white font-mono"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5 ml-1">お名前 (表示名)</label>
+                  <input 
+                    type="text"
+                    value={displayNameInput}
+                    onChange={(e) => setDisplayNameInput(e.target.value)}
+                    placeholder="例: たくみワンコ"
+                    className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none text-white"
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5 ml-1">メールアドレス</label>
+              <input 
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none text-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5 ml-1">パスワード</label>
+              <input 
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="6文字以上のパスワード"
+                className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-4 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 transition-all outline-none text-white"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-indigo-500/10 mt-2 active:scale-[0.99]"
+            >
+              {authMode === 'login' ? 'ログイン' : '新しくアカウント登録'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center text-xs text-slate-400">
+            {authMode === 'login' ? (
+              <p>
+                アカウントを持っていませんか？{' '}
+                <button onClick={() => { setAuthMode('signup'); setAuthError(''); }} className="text-indigo-400 font-bold hover:underline">
+                  新規アカウント作成
+                </button>
+              </p>
+            ) : (
+              <p>
+                すでにアカウントを持っていますか？{' '}
+                <button onClick={() => { setAuthMode('login'); setAuthError(''); }} className="text-indigo-400 font-bold hover:underline">
+                  ログインする
+                </button>
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex justify-center">
